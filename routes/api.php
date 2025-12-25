@@ -38,7 +38,7 @@ Route::middleware('jwt.auth')->group(function () {
     Route::get('packets', [PacketController::class, 'index']);
     Route::get('packets/{packet}', [PacketController::class, 'show']);
     Route::middleware('role:admin')->group(function () {
-        Route::put('packets/{packet}', [PacketController::class, 'update']);
+        Route::post('packets/{packet}', [PacketController::class, 'update']);
         Route::delete('packets/{packet}', [PacketController::class, 'destroy']);
     });
 
