@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Packet;
 use App\Models\Shipment;
+use App\Models\Driver;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -32,7 +33,12 @@ class PacketController extends Controller
 
     public function show($id) {
         try {
-            $packet = Packet::with('user')->where('user_id', auth()->id())->findOrFail($id);
+            // Admin can view any packet, user can only view their own
+            $query = Packet::with('user');
+            if (auth()->user()->role !== 'admin') {
+                $query->where('user_id', auth()->id());
+            }
+            $packet = $query->findOrFail($id);
             return response()->json($packet);
         } catch (ModelNotFoundException $e) {
             return response()->json(['error' => 'Packet not found'], 404);
@@ -119,6 +125,13 @@ public function update(Request $request, $id) {
 
         $updateData = [];
 
+        // Store old weight if weight is being updated
+        $oldWeight = null;
+        if ($request->has('weight') && $request->weight > 0) {
+            $oldWeight = $packet->weight;
+            $updateData['weight'] = $request->weight;
+        }
+
         // Only update fields that are provided and not empty
         if ($request->has('sender_name') && !empty(trim($request->sender_name))) {
             $updateData['sender_name'] = trim($request->sender_name);
@@ -137,9 +150,6 @@ public function update(Request $request, $id) {
         }
         if ($request->has('destination_address') && !empty(trim($request->destination_address))) {
             $updateData['destination_address'] = trim($request->destination_address);
-        }
-        if ($request->has('weight') && $request->weight > 0) {
-            $updateData['weight'] = $request->weight;
         }
 
         // Handle image upload separately
@@ -161,6 +171,18 @@ public function update(Request $request, $id) {
         // Only update if there's data to update
         if (!empty($updateData)) {
             $packet->update($updateData);
+
+            // Handle driver capacity adjustment if weight was updated
+            if ($oldWeight !== null && $oldWeight != $packet->weight) {
+                $shipment = Shipment::where('packet_id', $id)->first();
+                if ($shipment && $shipment->driver_id) {
+                    $driver = $shipment->driver;
+                    $weightDiff = $packet->weight - $oldWeight;
+                    $driver->current_capacity -= $weightDiff;
+                    $driver->save();
+                }
+            }
+
             return response()->json($packet->fresh());
         } else {
             return response()->json($packet); // No changes made
