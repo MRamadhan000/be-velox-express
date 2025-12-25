@@ -127,4 +127,52 @@ class ShipmentController extends Controller
             return response()->json(['error' => 'Failed to retrieve user shipments', 'message' => $e->getMessage()], 500);
         }
     }
+
+    public function updateStatusAndDriver(Request $request, $id) {
+        try {
+            $shipment = Shipment::with('packet')->findOrFail($id);
+
+            $request->validate([
+                'status' => 'sometimes|in:Pending,Pickup,Delivered',
+                'driver_id' => 'sometimes|nullable|exists:drivers,id',
+            ]);
+
+            return DB::transaction(function () use ($request, $shipment) {
+                $packet = $shipment->packet;
+                $oldDriverId = $shipment->driver_id;
+                $newDriverId = $request->driver_id;
+
+                // Jika driver_id berubah
+                if ($newDriverId != $oldDriverId) {
+                    // Jika ada driver lama, kembalikan kapasitasnya
+                    if ($oldDriverId) {
+                        $oldDriver = Driver::findOrFail($oldDriverId);
+                        $oldDriver->increment('current_capacity', $packet->weight);
+                    }
+
+                    // Jika ada driver baru, validasi kapasitas
+                    if ($newDriverId) {
+                        $newDriver = Driver::lockForUpdate()->findOrFail($newDriverId);
+                        if ($newDriver->current_capacity < $packet->weight) {
+                            throw new \Exception('Kapasitas Driver tidak cukup! Bobot paket melebihi kapasitas driver.');
+                        }
+                        // Kurangi kapasitas driver baru
+                        $newDriver->decrement('current_capacity', $packet->weight);
+                    }
+                }
+
+                // Update shipment
+                $shipment->update($request->only(['status', 'driver_id']));
+
+                return response()->json($shipment);
+            });
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json(['error' => 'Shipment or Driver not found', 'message' => $e->getMessage()], 404);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['error' => 'Validation failed', 'message' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            \Log::error('Failed to update shipment status and driver: ' . $e->getMessage());
+            return response()->json(['error' => 'Failed to update shipment', 'message' => $e->getMessage()], 500);
+        }
+    }
 }

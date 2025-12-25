@@ -59,6 +59,7 @@ Route::middleware('jwt.auth')->group(function () {
     Route::middleware('role:admin')->group(function () {
         Route::post('shipments', [ShipmentController::class, 'store']);
         Route::put('shipments/{shipment}', [ShipmentController::class, 'update']);
+        Route::put('shipments/{shipment}/status-driver', [ShipmentController::class, 'updateStatusAndDriver']);
         Route::delete('shipments/{shipment}', [ShipmentController::class, 'destroy']);
     });
 });
