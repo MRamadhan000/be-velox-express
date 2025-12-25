@@ -84,13 +84,17 @@ class ShipmentController extends Controller
         try {
             return DB::transaction(function () use ($id) {
                 $shipment = Shipment::with('packet')->findOrFail($id);
-                $driver = Driver::findOrFail($shipment->driver_id);
 
-                // LOGIKA RESTOCK: Kembalikan kapasitas saat transaksi dihapus
-                $driver->increment('current_capacity', $shipment->packet->weight);
+                // LOGIKA RESTOCK: Kembalikan kapasitas hanya jika driver ada
+                if ($shipment->driver_id) {
+                    $driver = Driver::find($shipment->driver_id);
+                    if ($driver) {
+                        $driver->increment('current_capacity', $shipment->packet->weight);
+                    }
+                }
 
                 $shipment->delete();
-                return response()->json(['message' => 'Shipment dibatalkan, kapasitas kurir kembali.']);
+                return response()->json(['message' => 'Shipment dibatalkan' . ($shipment->driver_id ? ', kapasitas kurir kembali.' : '.')]);
             });
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to delete shipment', 'message' => $e->getMessage()], 500);
@@ -141,13 +145,16 @@ class ShipmentController extends Controller
                 $packet = $shipment->packet;
                 $oldDriverId = $shipment->driver_id;
                 $newDriverId = $request->driver_id;
+                $oldStatus = $shipment->status;
 
                 // Jika driver_id berubah
                 if ($newDriverId != $oldDriverId) {
                     // Jika ada driver lama, kembalikan kapasitasnya
                     if ($oldDriverId) {
-                        $oldDriver = Driver::findOrFail($oldDriverId);
-                        $oldDriver->increment('current_capacity', $packet->weight);
+                        $oldDriver = Driver::find($oldDriverId);
+                        if ($oldDriver) {
+                            $oldDriver->increment('current_capacity', $packet->weight);
+                        }
                     }
 
                     // Jika ada driver baru, validasi kapasitas
@@ -158,6 +165,14 @@ class ShipmentController extends Controller
                         }
                         // Kurangi kapasitas driver baru
                         $newDriver->decrement('current_capacity', $packet->weight);
+                    }
+                }
+
+                // Jika status berubah ke Delivered, kembalikan kapasitas driver (jika ada)
+                if ($request->has('status') && $request->status === 'Delivered' && $oldStatus !== 'Delivered' && $shipment->driver_id) {
+                    $driver = Driver::find($shipment->driver_id);
+                    if ($driver) {
+                        $driver->increment('current_capacity', $packet->weight);
                     }
                 }
 
